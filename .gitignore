@@ -1,0 +1,26 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.class
+*.so
+.Python
+env/
+venv/
+.env
+.env.prod
+*.log
+instance/
+*.db
+
+# Data files
+data/
+*.csv
+*.json
+!sample_input.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
