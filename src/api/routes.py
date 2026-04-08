@@ -1,71 +1,140 @@
+"""
+API routes for cashflow analyzer.
+"""
 from fastapi import APIRouter, Depends, HTTPException, Query
-from typing import List
-from uuid import UUID
-from datetime import datetime, timedelta
+from typing import Optional
+import logging
+import traceback
+from datetime import datetime
 
+from ..core.config import settings
 from ..services.analyzer import CashflowAnalyzer
 from ..services.report_generator import ReportGenerator
-from ..models.analysis import (
-    CashflowRequest, CashflowReport,
-    PatternRequest, DetectedPattern
-)
+from ..schemas import CashflowRequest, DetectedPattern
 
-router = APIRouter(prefix="/api/v1/cashflow", tags=["Cashflow Analysis"])
+logger = logging.getLogger(__name__)
 
-
-@router.post("/analyze", response_model=CashflowReport)
-async def analyze_cashflow(request: CashflowRequest):
-    """
-    Analyze cashflow for a tenant over a specified period.
-    """
-    analyzer = CashflowAnalyzer()
-    report = await analyzer.generate_report(request)
-    return report
+router = APIRouter(prefix="/cashflow", tags=["Cashflow Analysis"])
 
 
-@router.get("/summary/{tenant_id}", response_model=CashflowReport)
+@router.get("/summary/{tenant_id}")
 async def get_cashflow_summary(
-    tenant_id: UUID,
-    days: int = Query(30, ge=1, le=365),
-    group_by: str = Query("day", regex="^(day|week|month)$")
+    tenant_id: str,
+    days: int = Query(settings.DEFAULT_LOOKBACK_DAYS, ge=1, le=365),
+    group_by: str = Query(settings.DEFAULT_GROUP_BY, regex="^(day|week|month)$")
 ):
     """
-    Get cashflow summary for the last N days.
+    Get cashflow summary for a tenant over the last N days.
     """
-    end_date = datetime.utcnow()
-    start_date = end_date - timedelta(days=days)
+    logger.info(f"=== Starting get_cashflow_summary ===")
+    logger.info(f"Tenant ID: {tenant_id}, Days: {days}, Group by: {group_by}")
     
-    request = CashflowRequest(
-        tenant_id=tenant_id,
-        start_date=start_date,
-        end_date=end_date,
-        group_by=group_by
-    )
-    
+    analyzer = None
+    try:
+        analyzer = CashflowAnalyzer()
+        logger.info("CashflowAnalyzer created successfully")
+        
+        result = await analyzer.get_summary(tenant_id, days, group_by)
+        logger.info(f"Result obtained: {result.keys() if result else 'None'}")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"ERROR in get_cashflow_summary: {e}")
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+        
+    finally:
+        if analyzer:
+            analyzer.close()
+            logger.info("Analyzer closed")
+
+@router.get("/realtime/{tenant_id}")
+async def get_realtime_stats(
+    tenant_id: str,
+    hours: int = Query(24, ge=1, le=168)
+):
+    """
+    Get real-time cashflow stats for the last N hours.
+    """
     analyzer = CashflowAnalyzer()
-    report = await analyzer.generate_report(request)
-    return report
+    try:
+        result = await analyzer.get_real_time_stats(tenant_id, hours)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        analyzer.close()
 
 
-@router.post("/patterns", response_model=List[DetectedPattern])
-async def detect_patterns(request: PatternRequest):
+@router.post("/patterns", response_model=list)
+async def detect_patterns(
+    tenant_id: str,
+    lookback_days: int = Query(90, ge=30, le=365),
+    min_confidence: float = Query(0.7, ge=0.5, le=0.95)
+):
     """
     Detect patterns in cashflow data.
     """
     analyzer = CashflowAnalyzer()
-    patterns = await analyzer.detect_patterns(request)
-    return patterns
+    try:
+        patterns = await analyzer.detect_patterns(tenant_id, lookback_days, min_confidence)
+        return patterns
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        analyzer.close()
 
 
-@router.get("/export/{report_id}")
-async def export_report(report_id: str, format: str = Query("csv", regex="^(csv|json)$")):
+@router.post("/analyze")
+async def analyze_cashflow(
+    request: CashflowRequest
+):
     """
-    Export a generated report in CSV or JSON format.
+    Custom cashflow analysis with date range.
     """
+    analyzer = CashflowAnalyzer()
+    try:
+        # Convert request to days
+        days = (request.end_date - request.start_date).days
+        result = await analyzer.get_summary(
+            str(request.tenant_id), 
+            days, 
+            request.group_by
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        analyzer.close()
+
+@router.get("/test")
+async def test_endpoint():
+    """Simple test endpoint to verify the service is working."""
+    return {"status": "ok", "message": "Service is running"}
+
+@router.get("/ping")
+async def ping():
+    """Simple ping endpoint to test if service is responding."""
+    return {"status": "pong", "timestamp": datetime.utcnow().isoformat()}
+
+@router.get("/export/{tenant_id}")
+async def export_report(
+    tenant_id: str,
+    format: str = Query("csv", regex="^(csv|json)$"),
+    days: int = Query(30, ge=1, le=365)
+):
+    """
+    Export cashflow report in CSV or JSON format.
+    """
+    analyzer = CashflowAnalyzer()
     generator = ReportGenerator()
-    export_url = await generator.get_export_url(report_id, format)
     
-    if not export_url:
-        raise HTTPException(status_code=404, detail="Report not found")
-    
-    return {"export_url": export_url, "format": format}
+    try:
+        data = await analyzer.get_summary(tenant_id, days)
+        report_url = await generator.generate_report(data, format)
+        return {"export_url": report_url, "format": format}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        analyzer.close()

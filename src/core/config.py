@@ -2,9 +2,8 @@
 Configuration management for cashflow analyzer.
 """
 from pydantic_settings import BaseSettings
-from pydantic import Field, field_validator
+from pydantic import Field
 from typing import List, Optional
-import json
 
 
 class Settings(BaseSettings):
@@ -16,42 +15,30 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     ENVIRONMENT: str = "development"
     
-    # Service Dependencies
+    # Database - PostgreSQL/TimescaleDB
+    DATABASE_URL: str = Field("postgresql://mpesa:mpesa123@localhost:5432/cashflow_db", env="DATABASE_URL")
+    
+    # Kafka
+    KAFKA_BOOTSTRAP_SERVERS: str = Field("localhost:9092", env="KAFKA_BOOTSTRAP_SERVERS")
+    KAFKA_CATEGORIZED_TOPIC: str = Field("categorized-transactions", env="KAFKA_CATEGORIZED_TOPIC")
+    KAFKA_CONSUMER_GROUP: str = "cashflow-analyzer"
+    
+    # Redis (optional, for caching)
     REDIS_URL: Optional[str] = Field(None, env="REDIS_URL")
-    KAFKA_BOOTSTRAP_SERVERS: Optional[str] = Field(None, env="KAFKA_BOOTSTRAP_SERVERS")
     
     # Analysis Settings
-    REPORT_STORAGE_PATH: str = "./data"
-    DEFAULT_CURRENCY: str = "KES"
+    DEFAULT_LOOKBACK_DAYS: int = 30
+    DEFAULT_GROUP_BY: str = "day"  # day, week, month
+    
+    # CORS
+    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8003"]
     
     # Logging
     LOG_LEVEL: str = "INFO"
     
-    # CORS - Fix the parsing
-    CORS_ORIGINS: List[str] = Field(
-        default=["http://localhost:3000", "http://localhost:8003"],
-        env="CORS_ORIGINS"
-    )
-    
-    @field_validator("CORS_ORIGINS", mode="before")
-    @classmethod
-    def parse_cors_origins(cls, v):
-        """Parse CORS_ORIGINS from environment variable."""
-        if isinstance(v, str):
-            # If it's a JSON string, parse it
-            if v.startswith('[') and v.endswith(']'):
-                try:
-                    return json.loads(v)
-                except json.JSONDecodeError:
-                    pass
-            # Otherwise split by comma
-            return [origin.strip() for origin in v.split(',') if origin.strip()]
-        return v
-    
     class Config:
         env_file = ".env"
-        case_sensitive = True
-        extra = "ignore"  # Ignore extra environment variables
+        extra = "ignore"
 
 
 settings = Settings()
