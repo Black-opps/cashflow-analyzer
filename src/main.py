@@ -83,3 +83,6 @@ if __name__ == "__main__":
         port=settings.API_PORT,
         reload=settings.DEBUG
     )
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "service": "cashflow-analyzer"}
