@@ -1,59 +1,129 @@
-"""
-Database setup for cashflow analyzer.
-"""
-from sqlalchemy import create_engine, Column, String, Float, DateTime, Integer, Index
+# cashflow-analyzer/src/core/database.py - COMPLETE
+
+import uuid
+from datetime import datetime
+
+from sqlalchemy import (
+    JSON,
+    Column,
+    DateTime,
+    Float,
+    Index,
+    Integer,
+    String,
+    Text,
+    create_engine,
+)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from datetime import datetime
-import os
 
-# Use SQLite directly (simpler)
-db_path = os.path.join(os.path.dirname(__file__), "..", "..", "cashflow.db")
-DATABASE_URL = f"sqlite:///{db_path}"
+from .config import settings
 
-print(f"Using database: {DATABASE_URL}")
-
-# Create engine with SQLite
+# Create engine
 engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False}
+    settings.DATABASE_URL,
+    pool_size=10,
+    max_overflow=20,
+    pool_pre_ping=True,
+    pool_recycle=3600,
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
+# ✅ ADD THESE MODELS HERE
 class CashflowMetric(Base):
-    """Time-series cashflow metric for daily aggregates."""
+    """Daily cashflow metrics"""
+
     __tablename__ = "cashflow_metrics"
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    __table_args__ = (
+        Index("ix_cashflow_metrics_tenant_period", "tenant_id", "period"),
+    )
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     tenant_id = Column(String(36), nullable=False)
-    period = Column(String(10), nullable=False)
+    period = Column(String(10), nullable=False)  # YYYY-MM-DD
     inflow = Column(Float, default=0.0)
     outflow = Column(Float, default=0.0)
     net = Column(Float, default=0.0)
     transaction_count = Column(Integer, default=0)
-    unique_customers = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class CashflowHourlyMetric(Base):
-    """Hourly granularity for real-time monitoring."""
+    """Hourly cashflow metrics for real-time monitoring"""
+
     __tablename__ = "cashflow_hourly_metrics"
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    __table_args__ = (Index("ix_cashflow_hourly_tenant_hour", "tenant_id", "hour"),)
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     tenant_id = Column(String(36), nullable=False)
     hour = Column(DateTime, nullable=False)
     inflow = Column(Float, default=0.0)
     outflow = Column(Float, default=0.0)
     net = Column(Float, default=0.0)
     transaction_count = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class CashflowAnalysis(Base):
+    """Stored cashflow analysis results"""
+
+    __tablename__ = "cashflow_analyses"
+    __table_args__ = (
+        Index("ix_cashflow_analysis_tenant_date", "tenant_id", "analysis_date"),
+        Index("ix_cashflow_analysis_tenant_period", "tenant_id", "period_type"),
+    )
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String(36), nullable=False)
+
+    analysis_date = Column(DateTime, nullable=False, default=datetime.utcnow)
+    period_type = Column(String(20), nullable=False, default="batch")
+    period_start = Column(DateTime, nullable=False)
+    period_end = Column(DateTime, nullable=False)
+
+    total_income = Column(Float, default=0.0)
+    total_expenses = Column(Float, default=0.0)
+    net_cashflow = Column(Float, default=0.0)
+    savings_rate = Column(Float, default=0.0)
+    expense_to_income_ratio = Column(Float, default=0.0)
+
+    transaction_count = Column(Integer, default=0)
+    income_count = Column(Integer, default=0)
+    expense_count = Column(Integer, default=0)
+
+    average_transaction = Column(Float, default=0.0)
+    average_income = Column(Float, default=0.0)
+    average_expense = Column(Float, default=0.0)
+
+    largest_income = Column(Float, default=0.0)
+    largest_expense = Column(Float, default=0.0)
+
+    expense_by_category = Column(JSON, default={})
+    income_by_category = Column(JSON, default={})
+    top_expense_categories = Column(JSON, default=[])
+    top_income_categories = Column(JSON, default=[])
+
+    daily_spending = Column(JSON, default={})
+    daily_income = Column(JSON, default={})
+    monthly_spending = Column(JSON, default={})
+    monthly_income = Column(JSON, default={})
+
+    insights = Column(JSON, default=[])
+
+    analysis_version = Column(String(20), default="1.0")
+    processing_duration_ms = Column(Float, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 def get_db():
-    """Get database session."""
+    """Get database session"""
     db = SessionLocal()
     try:
         yield db
@@ -62,15 +132,6 @@ def get_db():
 
 
 def init_db():
-    """Initialize database tables."""
+    """Initialize database"""
     Base.metadata.create_all(bind=engine)
-    print("Database tables created/verified")
-    
-    # Create indexes
-    try:
-        with engine.connect() as conn:
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_tenant_period ON cashflow_metrics(tenant_id, period)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_tenant_hour ON cashflow_hourly_metrics(tenant_id, hour)")
-            conn.commit()
-    except Exception as e:
-        print(f"Note: Could not create indexes: {e}")
+    print("✅ Database tables created/verified")

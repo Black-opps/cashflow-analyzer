@@ -1,44 +1,55 @@
-"""
-Configuration management for cashflow analyzer.
-"""
+# cashflow-analyzer/src/core/config.py - FIXED
+
+import os
+from typing import List
+
 from pydantic_settings import BaseSettings
-from pydantic import Field
-from typing import List, Optional
 
 
 class Settings(BaseSettings):
-    """Application settings."""
-    
-    # API Settings
-    API_VERSION: str = "v1"
-    API_PORT: int = 8002
+    """Application settings"""
+
+    # Service
+    PORT: int = 8005
     DEBUG: bool = False
     ENVIRONMENT: str = "development"
-    
-    # Database - PostgreSQL/TimescaleDB
-    DATABASE_URL: str = Field("postgresql://mpesa:mpesa123@localhost:5432/cashflow_db", env="DATABASE_URL")
-    
-    # Kafka
-    KAFKA_BOOTSTRAP_SERVERS: str = Field("localhost:9092", env="KAFKA_BOOTSTRAP_SERVERS")
-    KAFKA_CATEGORIZED_TOPIC: str = Field("categorized-transactions", env="KAFKA_CATEGORIZED_TOPIC")
-    KAFKA_CONSUMER_GROUP: str = "cashflow-analyzer"
-    
-    # Redis (optional, for caching)
-    REDIS_URL: Optional[str] = Field(None, env="REDIS_URL")
-    
-    # Analysis Settings
-    DEFAULT_LOOKBACK_DAYS: int = 30
-    DEFAULT_GROUP_BY: str = "day"  # day, week, month
-    
+
+    # Database
+    DATABASE_URL: str = os.getenv("DATABASE_URL")
+
+    # RabbitMQ
+    RABBITMQ_HOST: str = os.getenv("RABBITMQ_HOST", "localhost")
+    RABBITMQ_PORT: int = int(os.getenv("RABBITMQ_PORT", 5672))
+    RABBITMQ_USER: str = os.getenv("RABBITMQ_USER", "guest")
+    RABBITMQ_PASSWORD: str = os.getenv("RABBITMQ_PASSWORD", "guest")
+
+    # Service URLs
+    ANALYTICS_SERVICE_URL: str = os.getenv(
+        "ANALYTICS_SERVICE_URL", "http://localhost:8003"
+    )
+    TRANSACTION_SERVICE_URL: str = os.getenv(
+        "TRANSACTION_SERVICE_URL", "http://localhost:8006"
+    )
+
     # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8003"]
-    
-    # Logging
-    LOG_LEVEL: str = "INFO"
-    
+    CORS_ORIGINS: List[str] = [
+        "http://localhost:3000",
+        "http://localhost:8003",
+        "http://localhost:9000",
+    ]
+
+    # Analysis settings
+    DEFAULT_ANALYSIS_DAYS: int = 30
+    MAX_ANALYSIS_DAYS: int = 365
+    MIN_TRANSACTIONS_FOR_INSIGHTS: int = 10
+
+    # Cache settings
+    CACHE_TTL_SECONDS: int = 300
+
     class Config:
         env_file = ".env"
-        extra = "ignore"
+        env_file_encoding = "utf-8"
+        extra = "ignore"  # ✅ ADD THIS
 
 
 settings = Settings()
